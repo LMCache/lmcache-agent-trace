@@ -334,9 +334,17 @@ def plot_hit_rates(
     """
     plt.figure(figsize=(12, 7))
 
+    # log scale
+    x_values = []
+    for label in x_labels:
+        if label == "∞":
+            x_values.append(1000)  # Use large value for unlimited
+        else:
+            x_values.append(float(label))
+
     # Plot prefix
     plt.plot(
-        range(len(prefix_hit_rates)),
+        x_values,
         prefix_hit_rates,
         marker="o",
         linewidth=2,
@@ -347,7 +355,7 @@ def plot_hit_rates(
 
     # Plot substring
     plt.plot(
-        range(len(substring_hit_rates)),
+        x_values,
         substring_hit_rates,
         marker="s",
         linewidth=2,
@@ -363,7 +371,8 @@ def plot_hit_rates(
         fontsize=14,
         fontweight="bold",
     )
-    plt.xticks(range(len(x_labels)), x_labels, rotation=45)
+    plt.xscale('log')
+    plt.xticks(x_values, x_labels, rotation=45)
     plt.grid(True, alpha=0.3, linestyle="--")
 
     # Set y-axis limit based on max of both methods
@@ -372,10 +381,10 @@ def plot_hit_rates(
     plt.legend(loc="best", fontsize=10)
 
     # Annotate prefix matching rates (below the curve)
-    for i, (rate, label) in enumerate(zip(prefix_hit_rates, x_labels, strict=False)):
+    for x_val, rate in zip(x_values, prefix_hit_rates, strict=False):
         plt.annotate(
             f"{rate * 100:.1f}%",
-            xy=(i, rate),
+            xy=(x_val, rate),
             xytext=(0, -10),
             textcoords="offset points",
             ha="center",
@@ -384,10 +393,10 @@ def plot_hit_rates(
         )
 
     # Annotate substring matching rates (above the curve)
-    for i, (rate, label) in enumerate(zip(substring_hit_rates, x_labels, strict=False)):
+    for x_val, rate in zip(x_values, substring_hit_rates, strict=False):
         plt.annotate(
             f"{rate * 100:.1f}%",
-            xy=(i, rate),
+            xy=(x_val, rate),
             xytext=(0, 8),
             textcoords="offset points",
             ha="center",
