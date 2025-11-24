@@ -10,6 +10,7 @@ This repo is meant to run a series of experiments to collect trace data from AI 
 
 | Project Name | Status | Notes |
 |--------------|--------|-------|
+| [Terminus 1&2](https://www.tbench.ai/terminus) | ✅ | From [terminal bench](https://www.tbench.ai/) and [harbor](https://harborframework.com/docs/running-tbench) project, source code open; Basically the agent context management is to append new round conversation on all the previous chat history. Because of this nature, prefix and non-prefix cache hit rates should be stricly the same. Each step, it plans and executes multiple functions in sequential order. Easy to collect traces. |
 | [Claude Code Agent](https://pierce.dev/notes/under-the-hood-of-claude-code) | 🔄 | References: https://pierce.dev/notes/under-the-hood-of-claude-code, https://pierce.dev/notes/a-deep-dive-on-agent-sandboxes, https://medium.com/@outsightai/peeking-under-the-hood-of-claude-code-70f5a94a9a62; Planning to release a huggingface blog on 11/26/2025|
 | [MetaGPT](https://github.com/geekan/MetaGPT) | ⏳ | The Multi-Agent Framework: First AI Software Company, Towards Natural Language Programming |
 | [OpenHands](https://github.com/All-Hands-AI/OpenHands) | 🔄 | OpenHands: Code Less, Make More. (formerly OpenDevin), a platform for software development agents powered by AI |
