@@ -17,7 +17,7 @@ A simple vibe-coded agent trace prefix [analyzer](https://v0-llm-agent-dashboard
 | [MetaGPT](https://github.com/geekan/MetaGPT) | 🔄 | The Multi-Agent Framework: First AI Software Company, Towards Natural Language Programming |
 | [OpenHands](https://github.com/All-Hands-AI/OpenHands) | 🔄 | OpenHands: Code Less, Make More. (formerly OpenDevin), a platform for software development agents powered by AI |
 | [GPT Pilot](https://github.com/Pythagora-io/gpt-pilot) | 🔄 | GPT Pilot is the core technology for the Pythagora VS Code extension that aims to provide the first real AI developer companion |
-| [Aider](https://github.com/Aider-AI/aider) | ⏳ | aider is AI pair programming in your terminal |
+| [Aider](https://github.com/Aider-AI/aider) | 🔄 | aider is AI pair programming in your terminal |
 | [Devika](https://github.com/stitionai/devika) | ⏳ | Devika is an Agentic AI Software Engineer that can understand high-level human instructions, break them down into steps, research relevant information, and write code to achieve the given objective |
 | [RepoAgent](https://github.com/OpenBMB/RepoAgent) | ⏳ | An LLM-powered repository agent designed to assist developers and teams in generating documentation and understanding repositories quickly |
 | [DSPy](https://github.com/stanfordnlp/dspy) | ⏳ | The framework for programming—not prompting—foundation models |
