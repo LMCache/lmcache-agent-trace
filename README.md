@@ -24,6 +24,7 @@ A simple vibe-coded agent trace prefix [analyzer](https://v0-llm-agent-dashboard
 | [ThinkGPT](https://github.com/alaeddine-13/thinkgpt) | 🔄 | Agent techniques to augment your LLM and push it beyond its limits |
 | [PyCodeAGI](https://github.com/chakkaradeep/pyCodeAGI) | ⏳ | A small AGI experiment to generate a Python app given what app the user wants to build |
 | [SuperAGI](https://github.com/TransformerOptimus/SuperAGI) | ⏳ | SuperAGI - A dev-first open source autonomous AI agent framework |
+| [MemGPT(letta)](https://github.com/letta-ai/letta) | ⏳ | Letta is the platform for building stateful agents: open AI with advanced memory that can learn and self-improve over time. |
 
 More agents to be added from the [Awesome Agents](https://github.com/kyrolabs/awesome-agents?tab=readme-ov-file#software-development) repository, specifically focusing on the **Software Development** category. If the list is drained, use the [backup list](https://github.com/e2b-dev/awesome-ai-agents?tab=readme-ov-file). Contact [Kobe](https://github.com/kobe0938) for any questions.
 
