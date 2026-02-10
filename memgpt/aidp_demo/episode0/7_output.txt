@@ -1,0 +1,7 @@
+Done! The function handles all your requirements:
+- Splits text into chunks ≤ max_chars
+- Doesn't break words
+- Oversized words go in their own chunk
+- Preserves spacing (single spaces between words)
+
+Memory has been updated with details about your text chunking utility project! 🎯

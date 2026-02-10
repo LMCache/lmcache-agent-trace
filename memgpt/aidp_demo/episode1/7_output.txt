@@ -1,0 +1,9 @@
+Got it! I've saved your style preferences to memory. I'll make sure to follow these guidelines:
+
+✅ Python 3.11+ type hints everywhere  
+✅ Dataclasses only when truly needed  
+✅ pytest-style tests with plain asserts  
+✅ Small functions, no clever one-liners  
+✅ Google-style docstrings  
+
+The code I provided earlier actually already follows most of these! The type hints are there (`str`, `int`, `list[str]`), tests use plain asserts, and the function is straightforward. Let me know if you'd like me to regenerate it with a Google-style docstring or any other adjustments! 👍

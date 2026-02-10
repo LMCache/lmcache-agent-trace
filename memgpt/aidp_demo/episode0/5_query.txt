@@ -1,0 +1,2 @@
+Hey! I’m prototyping a small Python utility.
+Task: write a function chunk_text(text: str, max_chars: int) -> list[str] that splits text into chunks without breaking words. If a single word is longer than max_chars, put it alone in its own chunk. Preserve original whitespace minimally (single spaces between words is fine). Add 3 quick tests. Use memory insert or memory replace to store/edit core memory.

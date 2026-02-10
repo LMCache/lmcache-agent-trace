@@ -1,0 +1,1 @@
+One more thing to remember: I strongly prefer using pathlib.Path instead of os.path. Even if you don’t need it in this task, I want you to keep this in mind for later. Use memory insert or memory replace to store/edit core memory.

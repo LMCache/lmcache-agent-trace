@@ -1,0 +1,3 @@
+Perfect! Added to your coding style preferences: **use double quotes for strings (unless the string contains ")** 
+
+Your complete style guide is now saved and I'll follow it consistently in all future Python code! 🐍✨

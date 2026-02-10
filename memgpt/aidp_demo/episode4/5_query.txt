@@ -1,0 +1,2 @@
+Small preference reminder (please store this):
+When you write Python, I prefer double quotes for strings unless the string itself contains ". Use memory insert or memory replace to store/edit core memory.

@@ -1,0 +1,6 @@
+Before you code: I’m picky about style. Please remember this preference:
+Use Python 3.11+ type hints everywhere
+Prefer dataclasses only if needed (likely not needed here)
+Use pytest-style tests (plain assert)
+Keep functions small and avoid clever one-liners
+If you can, format docstrings in Google style. Use memory insert or memory replace to store/edit core memory.
