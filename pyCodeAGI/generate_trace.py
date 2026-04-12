@@ -1,0 +1,786 @@
+#!/usr/bin/env python3
+"""Generate synthetic PyCodeAGI trace in JSONL format.
+
+PyCodeAGI (https://github.com/chakkaradeep/pyCodeAGI) is a 6-step sequential
+LLM pipeline that generates Python/Streamlit apps from a high-level objective.
+Each step accumulates all previous outputs into the next prompt, creating an
+expanding prefix chain ideal for cache-reuse analysis.
+
+Usage:
+    python generate_trace.py          # writes trace.jsonl in the same directory
+    python generate_trace.py -o out.jsonl
+
+Zero external dependencies — runs on any Python 3.7+.
+"""
+
+import json
+import os
+import argparse
+
+SYSTEM_PROMPT = (
+    "You are code generation AI proficient in Python and Streamlit.\n"
+    "Your goal is to build a Python app.\n"
+    "You will use Streamlit for building the app user interface.\n"
+    "Assume all required libraries are installed.\n"
+    "Users will interact with the web app built using Streamlit and Python."
+)
+
+STEP_NAMES = ["description", "architecture", "ux_flow", "code_flow", "coding_steps", "app_code"]
+
+STEP_PROMPTS = {
+    "description": (
+        "Create a concise description for the Python app: {objective}\n"
+        "Use your expertise to envision the app's purpose and functionality."
+    ),
+    "architecture": (
+        "Create the architecture for the Python app: {objective}\n"
+        "App Description: {description}\n"
+        "Create the architecture for the Python app."
+    ),
+    "ux_flow": (
+        "Create the UX flow for the Python app: {objective}\n"
+        "App Description: {description}\n"
+        "App Architecture: {architecture}\n"
+        "Create the UX flow for the Python app."
+    ),
+    "code_flow": (
+        "Create the code flow for the Python app: {objective}\n"
+        "App Description: {description}\n"
+        "App Architecture: {architecture}\n"
+        "App UX Flow: {ux_flow}\n"
+        "Create the code flow for the Python app."
+    ),
+    "coding_steps": (
+        "Create the coding steps for the Python app: {objective}\n"
+        "App Description: {description}\n"
+        "App Architecture: {architecture}\n"
+        "App UX Flow: {ux_flow}\n"
+        "App Code Flow: {code_flow}\n"
+        "Create the coding steps for the Python app."
+    ),
+    "app_code": (
+        "Write the Python app code for: {objective}\n"
+        "App Description: {description}\n"
+        "App Architecture: {architecture}\n"
+        "App UX Flow: {ux_flow}\n"
+        "App Code Flow: {code_flow}\n"
+        "App Coding Steps: {coding_steps}\n"
+        "Write clean, well-commented Python code using Streamlit for the UI."
+    ),
+}
+
+# ---------------------------------------------------------------------------
+# Synthetic outputs for each session
+# ---------------------------------------------------------------------------
+
+SYNTHETIC_SESSIONS = [
+    {
+        "objective": "calculator app",
+        "outputs": {
+            "description": (
+                "A Streamlit-based Python calculator application that performs basic "
+                "arithmetic operations (addition, subtraction, multiplication, division) "
+                "with support for decimal numbers and operation history tracking. Users "
+                "interact through a clean web interface with input fields and buttons."
+            ),
+            "architecture": (
+                "Single-file Streamlit application using a modular functional design.\n"
+                "Core components:\n"
+                "1. Input Module — Two number inputs and an operator selector rendered "
+                "via st.number_input and st.selectbox.\n"
+                "2. Calculator Engine — Pure function that maps operator symbols to "
+                "arithmetic operations, with explicit ZeroDivisionError handling.\n"
+                "3. History Manager — Uses st.session_state with a collections.deque "
+                "(maxlen=10) to persist calculation history across reruns.\n"
+                "4. Display Module — Two-column layout: left column for input/result, "
+                "right column for scrollable history."
+            ),
+            "ux_flow": (
+                "1. App launches showing title 'Calculator App' and two-column layout\n"
+                "2. Left column: user enters first number, selects operator (+, -, *, /), "
+                "enters second number\n"
+                "3. User clicks 'Calculate' button\n"
+                "4. Result displayed as a success message below the button\n"
+                "5. If division by zero, an error message is shown instead\n"
+                "6. Each successful calculation is appended to the history deque\n"
+                "7. Right column: history list updates in real time (most recent first)\n"
+                "8. User can clear history with a 'Clear History' button"
+            ),
+            "code_flow": (
+                "main() → st.title() → init_session_state() → render_input_column() → "
+                "[st.number_input(num1) | st.selectbox(op) | st.number_input(num2)] → "
+                "on_calculate_click() → calculate(num1, op, num2) → "
+                "[display_result(result) | display_error()] → "
+                "update_history(expr, result) → render_history_column() → "
+                "[show_history() | clear_history()]"
+            ),
+            "coding_steps": (
+                "1. Import streamlit and collections.deque\n"
+                "2. Set page title with st.title('Calculator App')\n"
+                "3. Initialize st.session_state.history as deque(maxlen=10) if not present\n"
+                "4. Create two-column layout with st.columns(2)\n"
+                "5. In left column: render st.number_input for num1 and num2, "
+                "st.selectbox for operator\n"
+                "6. Add 'Calculate' button; on click compute result using operator map dict\n"
+                "7. Handle ZeroDivisionError — show st.error\n"
+                "8. On success — show st.success and append to history deque\n"
+                "9. In right column: render history entries with st.text in reversed order\n"
+                "10. Add 'Clear History' button to reset session_state.history"
+            ),
+            "app_code": (
+                "import streamlit as st\n"
+                "from collections import deque\n"
+                "\n"
+                "st.title('Calculator App')\n"
+                "\n"
+                "# Initialize history in session state\n"
+                "if 'history' not in st.session_state:\n"
+                "    st.session_state.history = deque(maxlen=10)\n"
+                "\n"
+                "col1, col2 = st.columns(2)\n"
+                "\n"
+                "with col1:\n"
+                "    num1 = st.number_input('First number', value=0.0)\n"
+                "    operator = st.selectbox('Operator', ['+', '-', '*', '/'])\n"
+                "    num2 = st.number_input('Second number', value=0.0)\n"
+                "\n"
+                "    if st.button('Calculate'):\n"
+                "        try:\n"
+                "            ops = {\n"
+                "                '+': num1 + num2,\n"
+                "                '-': num1 - num2,\n"
+                "                '*': num1 * num2,\n"
+                "                '/': num1 / num2 if num2 != 0 else None,\n"
+                "            }\n"
+                "            result = ops[operator]\n"
+                "            if result is None:\n"
+                "                st.error('Cannot divide by zero!')\n"
+                "            else:\n"
+                "                st.success(f'Result: {result}')\n"
+                "                st.session_state.history.append(\n"
+                "                    f'{num1} {operator} {num2} = {result}'\n"
+                "                )\n"
+                "        except Exception as e:\n"
+                "            st.error(f'Error: {e}')\n"
+                "\n"
+                "with col2:\n"
+                "    st.subheader('History')\n"
+                "    if st.button('Clear History'):\n"
+                "        st.session_state.history.clear()\n"
+                "    for entry in reversed(st.session_state.history):\n"
+                "        st.text(entry)"
+            ),
+        },
+    },
+    {
+        "objective": "todo list app",
+        "outputs": {
+            "description": (
+                "A Streamlit-based todo list application that lets users create, read, "
+                "update, and delete tasks. Each task has a title, optional description, "
+                "priority level (High/Medium/Low), and completion status. Tasks are stored "
+                "in session state and can be sorted by priority or creation order."
+            ),
+            "architecture": (
+                "Single-file Streamlit application with dataclass-based task modeling.\n"
+                "Core components:\n"
+                "1. Task Model — Python dataclass with fields: id (uuid4), title, "
+                "description, priority (enum: High/Medium/Low), done (bool), created_at.\n"
+                "2. Task Store — List[Task] in st.session_state, providing add/remove/"
+                "update/toggle operations.\n"
+                "3. Filter & Sort Engine — Sidebar controls for filtering by status and "
+                "sorting by priority or date.\n"
+                "4. UI Layer — Streamlit form for adding tasks, expandable cards for "
+                "existing tasks with inline edit/delete buttons."
+            ),
+            "ux_flow": (
+                "1. App launches with title 'Todo List' and a sidebar for filters\n"
+                "2. Sidebar: dropdown to filter (All / Active / Completed), sort selector\n"
+                "3. Main area top: form with title input, description textarea, priority "
+                "selector, and 'Add Task' button\n"
+                "4. Below the form: list of task cards, each showing checkbox, title, "
+                "priority badge, and expand button\n"
+                "5. Expanding a card reveals description, created date, 'Edit' and "
+                "'Delete' buttons\n"
+                "6. Checking the checkbox toggles done status immediately\n"
+                "7. 'Delete' removes the task with a confirmation toast\n"
+                "8. Footer shows task count summary (e.g., '3 of 5 tasks completed')"
+            ),
+            "code_flow": (
+                "main() → st.title() → init_tasks() → render_sidebar_filters() → "
+                "render_add_task_form() → on_add_click() → Task(...) → "
+                "append_to_store() → filter_tasks(status_filter) → "
+                "sort_tasks(sort_key) → for task in filtered: render_task_card(task) → "
+                "[toggle_done(task_id) | delete_task(task_id) | edit_task(task_id)] → "
+                "render_footer_summary(total, completed)"
+            ),
+            "coding_steps": (
+                "1. Import streamlit, uuid, dataclasses, datetime\n"
+                "2. Define Task dataclass with id, title, description, priority, done, "
+                "created_at fields\n"
+                "3. Initialize st.session_state.tasks as empty list if not present\n"
+                "4. Build sidebar with st.selectbox for status filter and sort order\n"
+                "5. Create st.form for new task input (title, description, priority)\n"
+                "6. Implement add_task(): validate title not empty, create Task, append\n"
+                "7. Implement filter_tasks(): return list filtered by status selection\n"
+                "8. Implement sort_tasks(): sort by priority rank or created_at\n"
+                "9. Render each task as st.expander with checkbox, badges, edit/delete\n"
+                "10. Implement toggle_done(), delete_task(), edit_task() callbacks\n"
+                "11. Render footer with st.caption showing completion summary"
+            ),
+            "app_code": (
+                "import streamlit as st\n"
+                "import uuid\n"
+                "from dataclasses import dataclass, field\n"
+                "from datetime import datetime\n"
+                "\n"
+                "PRIORITY_RANK = {'High': 0, 'Medium': 1, 'Low': 2}\n"
+                "\n"
+                "@dataclass\n"
+                "class Task:\n"
+                "    title: str\n"
+                "    description: str = ''\n"
+                "    priority: str = 'Medium'\n"
+                "    done: bool = False\n"
+                "    id: str = field(default_factory=lambda: str(uuid.uuid4()))\n"
+                "    created_at: str = field(default_factory=lambda: datetime.now().isoformat())\n"
+                "\n"
+                "st.title('Todo List')\n"
+                "\n"
+                "if 'tasks' not in st.session_state:\n"
+                "    st.session_state.tasks = []\n"
+                "\n"
+                "# Sidebar filters\n"
+                "status_filter = st.sidebar.selectbox('Filter', ['All', 'Active', 'Completed'])\n"
+                "sort_by = st.sidebar.selectbox('Sort by', ['Priority', 'Date Created'])\n"
+                "\n"
+                "# Add task form\n"
+                "with st.form('add_task'):\n"
+                "    title = st.text_input('Task title')\n"
+                "    desc = st.text_area('Description (optional)')\n"
+                "    priority = st.selectbox('Priority', ['High', 'Medium', 'Low'])\n"
+                "    if st.form_submit_button('Add Task') and title:\n"
+                "        st.session_state.tasks.append(Task(title, desc, priority))\n"
+                "        st.success(f'Added: {title}')\n"
+                "\n"
+                "# Filter and sort\n"
+                "tasks = st.session_state.tasks\n"
+                "if status_filter == 'Active':\n"
+                "    tasks = [t for t in tasks if not t.done]\n"
+                "elif status_filter == 'Completed':\n"
+                "    tasks = [t for t in tasks if t.done]\n"
+                "if sort_by == 'Priority':\n"
+                "    tasks = sorted(tasks, key=lambda t: PRIORITY_RANK[t.priority])\n"
+                "else:\n"
+                "    tasks = sorted(tasks, key=lambda t: t.created_at, reverse=True)\n"
+                "\n"
+                "# Render tasks\n"
+                "for task in tasks:\n"
+                "    with st.expander(f\"{'✅' if task.done else '⬜'} {task.title} [{task.priority}]\"):\n"
+                "        st.write(task.description or '_No description_')\n"
+                "        st.caption(f'Created: {task.created_at}')\n"
+                "        c1, c2 = st.columns(2)\n"
+                "        if c1.button('Toggle Done', key=f'tog_{task.id}'):\n"
+                "            task.done = not task.done\n"
+                "            st.rerun()\n"
+                "        if c2.button('Delete', key=f'del_{task.id}'):\n"
+                "            st.session_state.tasks = [t for t in st.session_state.tasks if t.id != task.id]\n"
+                "            st.rerun()\n"
+                "\n"
+                "# Footer summary\n"
+                "total = len(st.session_state.tasks)\n"
+                "done_count = sum(1 for t in st.session_state.tasks if t.done)\n"
+                "st.caption(f'{done_count} of {total} tasks completed')"
+            ),
+        },
+    },
+    {
+        "objective": "weather dashboard app",
+        "outputs": {
+            "description": (
+                "A Streamlit-based weather dashboard application that accepts a city name "
+                "and displays current weather conditions including temperature, humidity, "
+                "wind speed, and a 5-day forecast. The app uses simulated weather data for "
+                "demonstration purposes and presents information through cards and charts."
+            ),
+            "architecture": (
+                "Single-file Streamlit application with a simulated data layer.\n"
+                "Core components:\n"
+                "1. Data Provider — Function that generates deterministic mock weather data "
+                "based on city name hash (temperature, humidity, wind, conditions, 5-day "
+                "forecast) so results are consistent per city.\n"
+                "2. Current Weather Display — Metric cards using st.metric showing "
+                "temperature, humidity, wind speed, and condition icon.\n"
+                "3. Forecast Chart — st.line_chart displaying 5-day temperature trend.\n"
+                "4. Search Module — Text input with search button and recent searches "
+                "stored in session state.\n"
+                "5. Theme — Uses st.set_page_config for wide layout and weather emoji "
+                "mapping for visual polish."
+            ),
+            "ux_flow": (
+                "1. App launches with title 'Weather Dashboard' in wide layout\n"
+                "2. Top: text input for city name with 'Search' button and recent searches "
+                "as quick-select chips\n"
+                "3. On search: main area shows city name header with condition emoji\n"
+                "4. Row of metric cards: Temperature (°C), Humidity (%), Wind (km/h), "
+                "Condition\n"
+                "5. Below metrics: 5-day forecast as a line chart with daily high/low\n"
+                "6. Below chart: expandable table with detailed daily forecast data\n"
+                "7. Sidebar: list of recent searches (last 5 cities) as clickable buttons\n"
+                "8. Error state: friendly message if city name is empty"
+            ),
+            "code_flow": (
+                "main() → st.set_page_config(layout='wide') → st.title() → "
+                "init_recent_searches() → render_search_bar() → on_search(city) → "
+                "generate_weather_data(city) → render_current_weather(data) → "
+                "[st.metric(temp) | st.metric(humidity) | st.metric(wind)] → "
+                "render_forecast_chart(data.forecast) → st.line_chart() → "
+                "render_forecast_table(data.forecast) → st.dataframe() → "
+                "update_recent_searches(city) → render_sidebar_recent()"
+            ),
+            "coding_steps": (
+                "1. Import streamlit, hashlib, random\n"
+                "2. Set page config with wide layout and weather icon\n"
+                "3. Define CONDITION_MAP dict mapping condition names to emojis\n"
+                "4. Implement generate_weather_data(city): use hash(city) as random seed "
+                "to produce deterministic temp (−10 to 40°C), humidity (20–95%), wind "
+                "(0–80 km/h), condition, and 5 daily forecasts\n"
+                "5. Initialize st.session_state.recent_searches as empty list\n"
+                "6. Render search bar: st.text_input + st.button('Search')\n"
+                "7. On search: call generate_weather_data, display 4 st.metric cards in "
+                "a 4-column layout\n"
+                "8. Render 5-day forecast line chart using st.line_chart with DataFrame\n"
+                "9. Render expandable details table using st.dataframe\n"
+                "10. Append city to recent searches (dedup, max 5)\n"
+                "11. Render sidebar with recent search buttons"
+            ),
+            "app_code": (
+                "import streamlit as st\n"
+                "import hashlib\n"
+                "import random\n"
+                "\n"
+                "st.set_page_config(page_title='Weather Dashboard', layout='wide')\n"
+                "st.title('🌤 Weather Dashboard')\n"
+                "\n"
+                "CONDITIONS = {\n"
+                "    0: ('Sunny', '☀️'), 1: ('Cloudy', '☁️'), 2: ('Rainy', '🌧'),\n"
+                "    3: ('Snowy', '❄️'), 4: ('Windy', '💨'),\n"
+                "}\n"
+                "\n"
+                "def get_weather(city):\n"
+                "    seed = int(hashlib.md5(city.lower().encode()).hexdigest(), 16) % 10000\n"
+                "    rng = random.Random(seed)\n"
+                "    cond_id = rng.randint(0, 4)\n"
+                "    temp = rng.randint(-10, 40)\n"
+                "    data = {\n"
+                "        'temp': temp, 'humidity': rng.randint(20, 95),\n"
+                "        'wind': rng.randint(0, 80),\n"
+                "        'condition': CONDITIONS[cond_id][0],\n"
+                "        'icon': CONDITIONS[cond_id][1],\n"
+                "        'forecast': [{'day': f'Day {i+1}',\n"
+                "                      'high': temp + rng.randint(-3, 5),\n"
+                "                      'low': temp - rng.randint(2, 8)}\n"
+                "                     for i in range(5)],\n"
+                "    }\n"
+                "    return data\n"
+                "\n"
+                "if 'recent' not in st.session_state:\n"
+                "    st.session_state.recent = []\n"
+                "\n"
+                "# Search bar\n"
+                "city = st.text_input('Enter city name', placeholder='e.g., Tokyo')\n"
+                "\n"
+                "# Sidebar recent searches\n"
+                "st.sidebar.subheader('Recent Searches')\n"
+                "for c in st.session_state.recent:\n"
+                "    if st.sidebar.button(c, key=f'recent_{c}'):\n"
+                "        city = c\n"
+                "\n"
+                "if city:\n"
+                "    w = get_weather(city)\n"
+                "    st.header(f\"{w['icon']} {city.title()} — {w['condition']}\")\n"
+                "    c1, c2, c3 = st.columns(3)\n"
+                "    c1.metric('Temperature', f\"{w['temp']}°C\")\n"
+                "    c2.metric('Humidity', f\"{w['humidity']}%\")\n"
+                "    c3.metric('Wind', f\"{w['wind']} km/h\")\n"
+                "\n"
+                "    import pandas as pd\n"
+                "    df = pd.DataFrame(w['forecast'])\n"
+                "    st.subheader('5-Day Forecast')\n"
+                "    st.line_chart(df.set_index('day')[['high', 'low']])\n"
+                "    with st.expander('Detailed Forecast'):\n"
+                "        st.dataframe(df)\n"
+                "\n"
+                "    if city not in st.session_state.recent:\n"
+                "        st.session_state.recent.insert(0, city)\n"
+                "        st.session_state.recent = st.session_state.recent[:5]"
+            ),
+        },
+    },
+    {
+        "objective": "quiz app",
+        "outputs": {
+            "description": (
+                "A Streamlit-based multiple-choice quiz application with a built-in "
+                "question bank, scoring system, and result summary. Users answer one "
+                "question at a time, receive immediate feedback, and see a final score "
+                "with correct/incorrect breakdown at the end."
+            ),
+            "architecture": (
+                "Single-file Streamlit application with state-machine navigation.\n"
+                "Core components:\n"
+                "1. Question Bank — List of dicts, each containing question text, four "
+                "options (A–D), correct answer key, and explanation.\n"
+                "2. Quiz State Machine — Uses st.session_state to track: current question "
+                "index, user answers list, score, and quiz phase (intro/quiz/result).\n"
+                "3. Question Renderer — Displays question number, progress bar, question "
+                "text, and radio buttons for options.\n"
+                "4. Feedback Module — After submission shows correct/incorrect with "
+                "explanation before advancing.\n"
+                "5. Results Dashboard — Final screen showing total score, percentage, "
+                "per-question breakdown with color coding."
+            ),
+            "ux_flow": (
+                "1. App launches with title 'Quiz App' and a 'Start Quiz' button\n"
+                "2. After start: progress bar at top shows question N of total\n"
+                "3. Question text displayed prominently\n"
+                "4. Four radio button options (A, B, C, D)\n"
+                "5. 'Submit Answer' button — disabled until an option is selected\n"
+                "6. After submit: green banner for correct, red for incorrect, plus "
+                "explanation text\n"
+                "7. 'Next Question' button appears to advance\n"
+                "8. After last question: results screen with score fraction, percentage, "
+                "emoji rating, and per-question table\n"
+                "9. 'Restart Quiz' button resets all state"
+            ),
+            "code_flow": (
+                "main() → st.title() → init_quiz_state() → "
+                "if phase=='intro': render_intro() → on_start() → "
+                "if phase=='quiz': render_question(idx) → st.radio(options) → "
+                "on_submit() → check_answer(user_ans, correct_ans) → "
+                "update_score() → show_feedback() → on_next() → "
+                "if idx >= len(questions): set_phase('result') → "
+                "if phase=='result': render_results(answers, score) → "
+                "render_breakdown_table() → on_restart()"
+            ),
+            "coding_steps": (
+                "1. Import streamlit\n"
+                "2. Define QUESTIONS list of dicts with keys: question, options (list of "
+                "4 strings), answer (index 0–3), explanation\n"
+                "3. Create 5 sample questions (Python trivia)\n"
+                "4. Initialize session_state: phase='intro', current_q=0, score=0, "
+                "answers=[], submitted=False\n"
+                "5. Implement render_intro(): show welcome text and 'Start Quiz' button\n"
+                "6. Implement render_question(): progress bar, question text, st.radio\n"
+                "7. Implement on_submit(): compare answer, set submitted=True, update score\n"
+                "8. Implement show_feedback(): st.success or st.error with explanation\n"
+                "9. Implement on_next(): increment current_q, check if quiz is done\n"
+                "10. Implement render_results(): score display, emoji rating, breakdown\n"
+                "11. Implement on_restart(): reset all session_state fields"
+            ),
+            "app_code": (
+                "import streamlit as st\n"
+                "\n"
+                "QUESTIONS = [\n"
+                "    {'question': 'What keyword defines a function in Python?',\n"
+                "     'options': ['func', 'define', 'def', 'function'],\n"
+                "     'answer': 2, 'explanation': \"'def' is the keyword used to define functions.\"},\n"
+                "    {'question': 'Which data structure uses key-value pairs?',\n"
+                "     'options': ['List', 'Tuple', 'Set', 'Dictionary'],\n"
+                "     'answer': 3, 'explanation': 'Dictionaries store key-value pairs.'},\n"
+                "    {'question': 'What does len() return for an empty list?',\n"
+                "     'options': ['None', '0', '-1', 'Error'],\n"
+                "     'answer': 1, 'explanation': 'len([]) returns 0.'},\n"
+                "    {'question': 'Which operator is used for exponentiation?',\n"
+                "     'options': ['^', '**', 'exp', '//'],\n"
+                "     'answer': 1, 'explanation': '** is the exponentiation operator.'},\n"
+                "    {'question': 'What is the output of bool([])?',\n"
+                "     'options': ['True', 'False', 'None', 'Error'],\n"
+                "     'answer': 1, 'explanation': 'Empty collections are falsy in Python.'},\n"
+                "]\n"
+                "\n"
+                "st.title('Quiz App')\n"
+                "\n"
+                "# Initialize state\n"
+                "for key, val in [('phase', 'intro'), ('current_q', 0), ('score', 0),\n"
+                "                 ('answers', []), ('submitted', False)]:\n"
+                "    if key not in st.session_state:\n"
+                "        st.session_state[key] = val\n"
+                "\n"
+                "if st.session_state.phase == 'intro':\n"
+                "    st.write('Welcome! Test your Python knowledge.')\n"
+                "    st.write(f'{len(QUESTIONS)} questions. Good luck!')\n"
+                "    if st.button('Start Quiz'):\n"
+                "        st.session_state.phase = 'quiz'\n"
+                "        st.rerun()\n"
+                "\n"
+                "elif st.session_state.phase == 'quiz':\n"
+                "    idx = st.session_state.current_q\n"
+                "    q = QUESTIONS[idx]\n"
+                "    st.progress((idx) / len(QUESTIONS))\n"
+                "    st.subheader(f'Question {idx + 1} of {len(QUESTIONS)}')\n"
+                "    st.write(q['question'])\n"
+                "    choice = st.radio('Select your answer:', q['options'], key=f'q_{idx}')\n"
+                "\n"
+                "    if not st.session_state.submitted:\n"
+                "        if st.button('Submit Answer'):\n"
+                "            user_idx = q['options'].index(choice)\n"
+                "            correct = user_idx == q['answer']\n"
+                "            if correct:\n"
+                "                st.session_state.score += 1\n"
+                "            st.session_state.answers.append({\n"
+                "                'question': q['question'], 'correct': correct,\n"
+                "                'your_answer': choice,\n"
+                "                'correct_answer': q['options'][q['answer']]})\n"
+                "            st.session_state.submitted = True\n"
+                "            st.rerun()\n"
+                "    else:\n"
+                "        last = st.session_state.answers[-1]\n"
+                "        if last['correct']:\n"
+                "            st.success(f\"Correct! {q['explanation']}\")\n"
+                "        else:\n"
+                "            st.error(f\"Wrong. The answer is {last['correct_answer']}. {q['explanation']}\")\n"
+                "        if st.button('Next Question'):\n"
+                "            st.session_state.current_q += 1\n"
+                "            st.session_state.submitted = False\n"
+                "            if st.session_state.current_q >= len(QUESTIONS):\n"
+                "                st.session_state.phase = 'result'\n"
+                "            st.rerun()\n"
+                "\n"
+                "elif st.session_state.phase == 'result':\n"
+                "    score = st.session_state.score\n"
+                "    total = len(QUESTIONS)\n"
+                "    pct = int(score / total * 100)\n"
+                "    emoji = '🏆' if pct >= 80 else '👍' if pct >= 50 else '📚'\n"
+                "    st.header(f'{emoji} Your Score: {score}/{total} ({pct}%)')\n"
+                "    for i, a in enumerate(st.session_state.answers):\n"
+                "        icon = '✅' if a['correct'] else '❌'\n"
+                "        st.write(f\"{icon} Q{i+1}: {a['question']}\")\n"
+                "        if not a['correct']:\n"
+                "            st.caption(f\"Your answer: {a['your_answer']} | Correct: {a['correct_answer']}\")\n"
+                "    if st.button('Restart Quiz'):\n"
+                "        for key in ['phase', 'current_q', 'score', 'answers', 'submitted']:\n"
+                "            del st.session_state[key]\n"
+                "        st.rerun()"
+            ),
+        },
+    },
+    {
+        "objective": "note taking app",
+        "outputs": {
+            "description": (
+                "A Streamlit-based note-taking application that allows users to create, "
+                "edit, delete, and search notes. Each note has a title, body text, and "
+                "timestamp. Notes persist in session state and support keyword search "
+                "across titles and content."
+            ),
+            "architecture": (
+                "Single-file Streamlit application with CRUD operations.\n"
+                "Core components:\n"
+                "1. Note Model — Dict with keys: id (uuid4), title, body, created_at, "
+                "updated_at.\n"
+                "2. Note Store — List of note dicts in st.session_state with helper "
+                "functions for CRUD operations.\n"
+                "3. Search Engine — Simple substring matching across title and body "
+                "fields, case-insensitive.\n"
+                "4. Editor View — Conditional rendering: 'create' mode shows empty form, "
+                "'edit' mode pre-fills with existing note data.\n"
+                "5. List View — Sidebar listing all notes with search box; main area "
+                "shows selected note or editor."
+            ),
+            "ux_flow": (
+                "1. App launches with title 'Note Taking App' and sidebar\n"
+                "2. Sidebar top: search input field for filtering notes\n"
+                "3. Sidebar: 'New Note' button, followed by list of note titles\n"
+                "4. Clicking a note title shows it in the main area\n"
+                "5. Main area (view mode): note title, body text, timestamps, 'Edit' "
+                "and 'Delete' buttons\n"
+                "6. 'Edit' switches to edit mode: editable title input and body textarea "
+                "with 'Save' and 'Cancel' buttons\n"
+                "7. 'New Note': switches to create mode with empty title and body\n"
+                "8. 'Delete' removes the note and selects the next available note\n"
+                "9. Search filters the sidebar list in real time as user types"
+            ),
+            "code_flow": (
+                "main() → st.title() → init_notes() → render_sidebar() → "
+                "search_input() → filter_notes(query) → render_note_list(filtered) → "
+                "on_select_note(note_id) → if mode=='view': render_note_view(note) → "
+                "[on_edit() | on_delete(note_id)] → "
+                "if mode=='edit': render_note_editor(note) → on_save(note) → "
+                "if mode=='create': render_note_editor(None) → on_create(title, body)"
+            ),
+            "coding_steps": (
+                "1. Import streamlit, uuid, datetime\n"
+                "2. Initialize st.session_state: notes=[], selected_id=None, mode='view'\n"
+                "3. Implement create_note(title, body): generate uuid, set timestamps, "
+                "prepend to notes list\n"
+                "4. Implement update_note(note_id, title, body): find note, update fields "
+                "and updated_at timestamp\n"
+                "5. Implement delete_note(note_id): remove from list, clear selection\n"
+                "6. Implement search_notes(query): case-insensitive substring match on "
+                "title and body\n"
+                "7. Render sidebar: st.text_input for search, st.button for new note, "
+                "list of note buttons\n"
+                "8. Render view mode: st.subheader(title), st.write(body), timestamps, "
+                "edit/delete buttons\n"
+                "9. Render editor mode: st.text_input(title), st.text_area(body), save/"
+                "cancel buttons\n"
+                "10. Handle mode transitions: view↔edit, view→create, create→view\n"
+                "11. Add sample welcome note on first launch for better UX"
+            ),
+            "app_code": (
+                "import streamlit as st\n"
+                "import uuid\n"
+                "from datetime import datetime\n"
+                "\n"
+                "st.title('Note Taking App')\n"
+                "\n"
+                "# Initialize state\n"
+                "if 'notes' not in st.session_state:\n"
+                "    st.session_state.notes = [{\n"
+                "        'id': str(uuid.uuid4()), 'title': 'Welcome',\n"
+                "        'body': 'This is your first note. Edit or delete it, or create new ones!',\n"
+                "        'created_at': datetime.now().isoformat(),\n"
+                "        'updated_at': datetime.now().isoformat(),\n"
+                "    }]\n"
+                "if 'selected_id' not in st.session_state:\n"
+                "    st.session_state.selected_id = st.session_state.notes[0]['id'] if st.session_state.notes else None\n"
+                "if 'mode' not in st.session_state:\n"
+                "    st.session_state.mode = 'view'\n"
+                "\n"
+                "def find_note(note_id):\n"
+                "    return next((n for n in st.session_state.notes if n['id'] == note_id), None)\n"
+                "\n"
+                "# Sidebar\n"
+                "search = st.sidebar.text_input('Search notes', placeholder='Type to search...')\n"
+                "if st.sidebar.button('📝 New Note'):\n"
+                "    st.session_state.mode = 'create'\n"
+                "    st.session_state.selected_id = None\n"
+                "\n"
+                "filtered = [n for n in st.session_state.notes\n"
+                "            if not search or search.lower() in n['title'].lower()\n"
+                "            or search.lower() in n['body'].lower()]\n"
+                "for note in filtered:\n"
+                "    if st.sidebar.button(note['title'], key=f\"note_{note['id']}\"):\n"
+                "        st.session_state.selected_id = note['id']\n"
+                "        st.session_state.mode = 'view'\n"
+                "        st.rerun()\n"
+                "\n"
+                "# Main area\n"
+                "if st.session_state.mode == 'create':\n"
+                "    st.subheader('Create New Note')\n"
+                "    title = st.text_input('Title')\n"
+                "    body = st.text_area('Content', height=300)\n"
+                "    c1, c2 = st.columns(2)\n"
+                "    if c1.button('Save') and title:\n"
+                "        new_note = {'id': str(uuid.uuid4()), 'title': title, 'body': body,\n"
+                "                    'created_at': datetime.now().isoformat(),\n"
+                "                    'updated_at': datetime.now().isoformat()}\n"
+                "        st.session_state.notes.insert(0, new_note)\n"
+                "        st.session_state.selected_id = new_note['id']\n"
+                "        st.session_state.mode = 'view'\n"
+                "        st.rerun()\n"
+                "    if c2.button('Cancel'):\n"
+                "        st.session_state.mode = 'view'\n"
+                "        st.rerun()\n"
+                "\n"
+                "elif st.session_state.selected_id:\n"
+                "    note = find_note(st.session_state.selected_id)\n"
+                "    if note:\n"
+                "        if st.session_state.mode == 'view':\n"
+                "            st.subheader(note['title'])\n"
+                "            st.write(note['body'])\n"
+                "            st.caption(f\"Created: {note['created_at']} | Updated: {note['updated_at']}\")\n"
+                "            c1, c2 = st.columns(2)\n"
+                "            if c1.button('Edit'):\n"
+                "                st.session_state.mode = 'edit'\n"
+                "                st.rerun()\n"
+                "            if c2.button('Delete'):\n"
+                "                st.session_state.notes = [n for n in st.session_state.notes if n['id'] != note['id']]\n"
+                "                st.session_state.selected_id = st.session_state.notes[0]['id'] if st.session_state.notes else None\n"
+                "                st.rerun()\n"
+                "        elif st.session_state.mode == 'edit':\n"
+                "            st.subheader('Edit Note')\n"
+                "            title = st.text_input('Title', value=note['title'])\n"
+                "            body = st.text_area('Content', value=note['body'], height=300)\n"
+                "            c1, c2 = st.columns(2)\n"
+                "            if c1.button('Save'):\n"
+                "                note['title'] = title\n"
+                "                note['body'] = body\n"
+                "                note['updated_at'] = datetime.now().isoformat()\n"
+                "                st.session_state.mode = 'view'\n"
+                "                st.rerun()\n"
+                "            if c2.button('Cancel'):\n"
+                "                st.session_state.mode = 'view'\n"
+                "                st.rerun()\n"
+                "\n"
+                "else:\n"
+                "    st.info('Select a note from the sidebar or create a new one.')"
+            ),
+        },
+    },
+]
+
+
+def build_input(system_prompt: str, user_message: str) -> str:
+    """Combine system prompt and user message into a single input string."""
+    return f"[System]\n{system_prompt}\n\n[User]\n{user_message}"
+
+
+def generate_session_trace(session_id: int, session: dict) -> list:
+    """Generate 6 trace records for one session (one per pipeline step)."""
+    objective = session["objective"]
+    outputs = session["outputs"]
+    records = []
+    base_ts = session_id * 100  # space sessions apart
+
+    # Build accumulated context for each step
+    accumulated = {}
+    for step_idx, step_name in enumerate(STEP_NAMES):
+        # Format the user prompt with accumulated outputs
+        fmt_kwargs = {"objective": objective}
+        fmt_kwargs.update(accumulated)
+        user_message = STEP_PROMPTS[step_name].format(**fmt_kwargs)
+
+        input_text = build_input(SYSTEM_PROMPT, user_message)
+        output_text = outputs[step_name]
+
+        records.append({
+            "timestamp": base_ts + step_idx,
+            "input": input_text,
+            "output": output_text,
+            "session_id": session_id,
+        })
+
+        # Accumulate this step's output for subsequent steps
+        accumulated[step_name] = output_text
+
+    return records
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate PyCodeAGI synthetic trace")
+    parser.add_argument("-o", "--output", default=None,
+                        help="Output file path (default: trace.jsonl in script dir)")
+    args = parser.parse_args()
+
+    if args.output is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        args.output = os.path.join(script_dir, "trace.jsonl")
+
+    all_records = []
+    for session_id, session in enumerate(SYNTHETIC_SESSIONS):
+        records = generate_session_trace(session_id, session)
+        all_records.extend(records)
+
+    with open(args.output, "w", encoding="utf-8") as f:
+        for record in all_records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    print(f"Generated {len(all_records)} trace entries "
+          f"({len(SYNTHETIC_SESSIONS)} sessions x {len(STEP_NAMES)} steps)")
+    print(f"Output: {args.output}")
+
+
+if __name__ == "__main__":
+    main()
