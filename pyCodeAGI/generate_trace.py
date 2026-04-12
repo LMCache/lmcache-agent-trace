@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 """Generate synthetic PyCodeAGI trace in JSONL format.
 
-PyCodeAGI (https://github.com/chakkaradeep/pyCodeAGI) is a 6-step sequential
-LLM pipeline that generates Python/Streamlit apps from a high-level objective.
-Each step accumulates all previous outputs into the next prompt, creating an
-expanding prefix chain ideal for cache-reuse analysis.
+PyCodeAGI (https://github.com/chakkaradeep/pyCodeAGI) is a 5-step sequential
+LLM pipeline (GPT-4 version: pycodeagi-gpt4.py) that generates Python/Streamlit
+apps from a high-level objective.  Each step's *system message* accumulates all
+prior outputs, creating an expanding prefix chain — ideal for LMCache prefix
+cache-reuse analysis.
+
+Note: The original pycodeagi.py requires text-davinci-003 (deprecated Jan 2024).
+This trace is based on the GPT-4 chat version (pycodeagi-gpt4.py), which cannot
+be run in 2026 due to LangChain API changes (v0.0.139 → v0.3+).  This script
+faithfully reproduces the exact prompt templates so contributors can generate
+real traces once the code is ported.
 
 Usage:
     python generate_trace.py          # writes trace.jsonl in the same directory
@@ -13,60 +20,99 @@ Usage:
 Zero external dependencies — runs on any Python 3.7+.
 """
 
+import hashlib
 import json
 import os
 import argparse
 
-SYSTEM_PROMPT = (
+# ---------------------------------------------------------------------------
+# Prompt templates — verbatim from pycodeagi-gpt4.py (ChatOpenAI / gpt-4)
+# System message accumulates prior context; user message contains only the task.
+# ---------------------------------------------------------------------------
+
+SYSTEM_PROMPT_HEADER = (
     "You are code generation AI proficient in Python and Streamlit.\n"
     "Your goal is to build a Python app.\n"
     "You will use Streamlit for building the app user interface.\n"
     "Assume all required libraries are installed.\n"
-    "Users will interact with the web app built using Streamlit and Python."
+    "{instructions}"
 )
 
-STEP_NAMES = ["description", "architecture", "ux_flow", "code_flow", "coding_steps", "app_code"]
+STEP_NAMES = ["description", "architecture", "ux_flow", "code_flow", "app_code"]
 
-STEP_PROMPTS = {
-    "description": (
-        "Create a concise description for the Python app: {objective}\n"
-        "Use your expertise to envision the app's purpose and functionality."
-    ),
-    "architecture": (
-        "Create the architecture for the Python app: {objective}\n"
-        "App Description: {description}\n"
-        "Create the architecture for the Python app."
-    ),
-    "ux_flow": (
-        "Create the UX flow for the Python app: {objective}\n"
-        "App Description: {description}\n"
-        "App Architecture: {architecture}\n"
-        "Create the UX flow for the Python app."
-    ),
-    "code_flow": (
-        "Create the code flow for the Python app: {objective}\n"
-        "App Description: {description}\n"
-        "App Architecture: {architecture}\n"
-        "App UX Flow: {ux_flow}\n"
-        "Create the code flow for the Python app."
-    ),
-    "coding_steps": (
-        "Create the coding steps for the Python app: {objective}\n"
-        "App Description: {description}\n"
-        "App Architecture: {architecture}\n"
-        "App UX Flow: {ux_flow}\n"
-        "App Code Flow: {code_flow}\n"
-        "Create the coding steps for the Python app."
-    ),
-    "app_code": (
-        "Write the Python app code for: {objective}\n"
-        "App Description: {description}\n"
-        "App Architecture: {architecture}\n"
-        "App UX Flow: {ux_flow}\n"
-        "App Code Flow: {code_flow}\n"
-        "App Coding Steps: {coding_steps}\n"
-        "Write clean, well-commented Python code using Streamlit for the UI."
-    ),
+# sys_instructions → appended to system header (grows each step).
+# user_task        → clean task instruction in [User] block.
+STEPS_CONFIG = {
+    "description": {
+        "sys_instructions": (
+            "Users will interact with the web app built using Streamlit and Python."
+        ),
+        "user_task": (
+            "Create a concise description for the Python app: {objective}\n"
+            "Use your expertise to envision the app's purpose and functionality."
+        ),
+    },
+    "architecture": {
+        "sys_instructions": (
+            "You are given the app name and description.\n"
+            "App Name:\n{objective}\n"
+            "Description: \n{description}"
+        ),
+        "user_task": (
+            "Create a concise app architecture you can use to build the UX flow.\n"
+            "Outline the components and structure of the code.\n"
+            "Present the app architecture in an ordered list."
+        ),
+    },
+    "ux_flow": {
+        "sys_instructions": (
+            "You are given the app name, description and architecture.\n"
+            "App Name:\n{objective}\n"
+            "Description: \n{description}\n"
+            "Architecture:\n{architecture}"
+        ),
+        "user_task": (
+            "Create a concise UX flow that you can use to build code flow.\n"
+            "Present the UX flow an ordered list."
+        ),
+    },
+    "code_flow": {
+        "sys_instructions": (
+            "You are given the app name, description, architecture and UX flow.\n"
+            "App Name:\n{objective}\n"
+            "Description: \n{description}\n"
+            "Architecture:\n{architecture}\n"
+            "UX Flow:\n{ux_flow}"
+        ),
+        "user_task": (
+            "Create a concise code flow you can use to write code.\n"
+            "Outline the code components and structure.\n"
+            "Present the code flow in an ordered list."
+        ),
+    },
+    "app_code": {
+        "sys_instructions": (
+            "You are given the app name, description, architecture, UX flow and code flow.\n"
+            "App Name:\n{objective}\n"
+            "Description: \n{description}\n"
+            "Architecture:\n{architecture}\n"
+            "UX Flow:\n{ux_flow}\n"
+            "Code Flow:\n{code_flow}"
+        ),
+        "user_task": (
+            "Write the Python code for the app in a single python file.\n"
+            "Use SQLite python module for data storage.\n"
+            "Exclude environment setup, testing, debugging, and deployment tasks.\n"
+            "Build sample datasets with at least five items.\n"
+            "Follow these coding guidelines:\n"
+            "- Check and create database tables first in the main function.\n"
+            "- Use pd.loc to append new rows to the DataFrame.\n"
+            "- When building date sliders: First Convert dates using to_pydatetime() "
+            "then use their min and max values in st.slider.\n"
+            "- Use pd.to_datetime() on selected date ranges when filtering calendar events.\n"
+            "- Save all data in a SQLite database."
+        ),
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -722,38 +768,49 @@ SYNTHETIC_SESSIONS = [
 ]
 
 
-def build_input(system_prompt: str, user_message: str) -> str:
-    """Combine system prompt and user message into a single input string."""
-    return f"[System]\n{system_prompt}\n\n[User]\n{user_message}"
+# ---------------------------------------------------------------------------
+# Timestamp helpers
+# ---------------------------------------------------------------------------
+
+# Base: 2025-03-01 00:00:00 UTC in microseconds
+BASE_TIMESTAMP_US = 1_740_787_200_000_000
+
+# Cumulative wall-clock latency per step (µs) — realistic GPT-4 API durations
+STEP_DELAYS_US = [3_200_000, 8_100_000, 15_400_000, 19_700_000, 41_000_000]
+
+# Gap between consecutive sessions (~90 seconds in µs)
+SESSION_GAP_US = 90_000_000
 
 
-def generate_session_trace(session_id: int, session: dict) -> list:
-    """Generate 6 trace records for one session (one per pipeline step)."""
+def build_input(sys_instructions: str, user_task: str) -> str:
+    """Combine system and user messages into a single flat input string."""
+    system_msg = SYSTEM_PROMPT_HEADER.format(instructions=sys_instructions)
+    return f"[System]\n{system_msg}\n\n[User]\n{user_task}"
+
+
+def generate_session_trace(session_idx: int, session: dict) -> list:
+    """Generate 5 trace records for one session (one per pipeline step)."""
     objective = session["objective"]
     outputs = session["outputs"]
+    session_id = hashlib.md5(objective.encode("utf-8")).hexdigest()
+
+    session_start_us = BASE_TIMESTAMP_US + session_idx * SESSION_GAP_US
     records = []
-    base_ts = session_id * 100  # space sessions apart
+    accumulated: dict = {}
 
-    # Build accumulated context for each step
-    accumulated = {}
     for step_idx, step_name in enumerate(STEP_NAMES):
-        # Format the user prompt with accumulated outputs
-        fmt_kwargs = {"objective": objective}
-        fmt_kwargs.update(accumulated)
-        user_message = STEP_PROMPTS[step_name].format(**fmt_kwargs)
-
-        input_text = build_input(SYSTEM_PROMPT, user_message)
-        output_text = outputs[step_name]
+        step = STEPS_CONFIG[step_name]
+        fmt_kwargs = {"objective": objective, **accumulated}
+        sys_instructions = step["sys_instructions"].format(**fmt_kwargs)
+        user_task = step["user_task"].format(**fmt_kwargs)
 
         records.append({
-            "timestamp": base_ts + step_idx,
-            "input": input_text,
-            "output": output_text,
+            "timestamp": session_start_us + STEP_DELAYS_US[step_idx],
+            "input": build_input(sys_instructions, user_task),
+            "output": outputs[step_name],
             "session_id": session_id,
         })
-
-        # Accumulate this step's output for subsequent steps
-        accumulated[step_name] = output_text
+        accumulated[step_name] = outputs[step_name]
 
     return records
 
@@ -769,8 +826,8 @@ def main():
         args.output = os.path.join(script_dir, "trace.jsonl")
 
     all_records = []
-    for session_id, session in enumerate(SYNTHETIC_SESSIONS):
-        records = generate_session_trace(session_id, session)
+    for session_idx, session in enumerate(SYNTHETIC_SESSIONS):
+        records = generate_session_trace(session_idx, session)
         all_records.extend(records)
 
     with open(args.output, "w", encoding="utf-8") as f:
@@ -778,7 +835,7 @@ def main():
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     print(f"Generated {len(all_records)} trace entries "
-          f"({len(SYNTHETIC_SESSIONS)} sessions x {len(STEP_NAMES)} steps)")
+          f"({len(SYNTHETIC_SESSIONS)} sessions × {len(STEP_NAMES)} steps)")
     print(f"Output: {args.output}")
 
 
