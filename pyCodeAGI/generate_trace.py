@@ -4,14 +4,16 @@
 PyCodeAGI (https://github.com/chakkaradeep/pyCodeAGI) is a 5-step sequential
 LLM pipeline (GPT-4 version: pycodeagi-gpt4.py) that generates Python/Streamlit
 apps from a high-level objective.  Each step's *system message* accumulates all
-prior outputs, creating an expanding prefix chain — ideal for LMCache prefix
-cache-reuse analysis.
+prior outputs as a growing context block — a strong case for LMCache substring
+cache reuse (CacheBlend).  Note: consecutive steps do NOT form a strict prefix
+chain because each step changes its intro instruction line, breaking prefix
+continuity at ~40 tokens.
 
 Note: The original pycodeagi.py requires text-davinci-003 (deprecated Jan 2024).
 This trace is based on the GPT-4 chat version (pycodeagi-gpt4.py), which cannot
 be run in 2026 due to LangChain API changes (v0.0.139 → v0.3+).  This script
-faithfully reproduces the exact prompt templates so contributors can generate
-real traces once the code is ported.
+reproduces the prompt templates (adapted from pycodeagi-gpt4.py) so contributors
+can generate real traces once the code is ported.
 
 Usage:
     python generate_trace.py          # writes trace.jsonl in the same directory
@@ -26,7 +28,7 @@ import os
 import argparse
 
 # ---------------------------------------------------------------------------
-# Prompt templates — verbatim from pycodeagi-gpt4.py (ChatOpenAI / gpt-4)
+# Prompt templates — adapted from pycodeagi-gpt4.py (ChatOpenAI / gpt-4)
 # System message accumulates prior context; user message contains only the task.
 # ---------------------------------------------------------------------------
 
@@ -160,19 +162,6 @@ SYNTHETIC_SESSIONS = [
                 "update_history(expr, result) → render_history_column() → "
                 "[show_history() | clear_history()]"
             ),
-            "coding_steps": (
-                "1. Import streamlit and collections.deque\n"
-                "2. Set page title with st.title('Calculator App')\n"
-                "3. Initialize st.session_state.history as deque(maxlen=10) if not present\n"
-                "4. Create two-column layout with st.columns(2)\n"
-                "5. In left column: render st.number_input for num1 and num2, "
-                "st.selectbox for operator\n"
-                "6. Add 'Calculate' button; on click compute result using operator map dict\n"
-                "7. Handle ZeroDivisionError — show st.error\n"
-                "8. On success — show st.success and append to history deque\n"
-                "9. In right column: render history entries with st.text in reversed order\n"
-                "10. Add 'Clear History' button to reset session_state.history"
-            ),
             "app_code": (
                 "import streamlit as st\n"
                 "from collections import deque\n"
@@ -259,20 +248,6 @@ SYNTHETIC_SESSIONS = [
                 "sort_tasks(sort_key) → for task in filtered: render_task_card(task) → "
                 "[toggle_done(task_id) | delete_task(task_id) | edit_task(task_id)] → "
                 "render_footer_summary(total, completed)"
-            ),
-            "coding_steps": (
-                "1. Import streamlit, uuid, dataclasses, datetime\n"
-                "2. Define Task dataclass with id, title, description, priority, done, "
-                "created_at fields\n"
-                "3. Initialize st.session_state.tasks as empty list if not present\n"
-                "4. Build sidebar with st.selectbox for status filter and sort order\n"
-                "5. Create st.form for new task input (title, description, priority)\n"
-                "6. Implement add_task(): validate title not empty, create Task, append\n"
-                "7. Implement filter_tasks(): return list filtered by status selection\n"
-                "8. Implement sort_tasks(): sort by priority rank or created_at\n"
-                "9. Render each task as st.expander with checkbox, badges, edit/delete\n"
-                "10. Implement toggle_done(), delete_task(), edit_task() callbacks\n"
-                "11. Render footer with st.caption showing completion summary"
             ),
             "app_code": (
                 "import streamlit as st\n"
@@ -384,22 +359,6 @@ SYNTHETIC_SESSIONS = [
                 "render_forecast_table(data.forecast) → st.dataframe() → "
                 "update_recent_searches(city) → render_sidebar_recent()"
             ),
-            "coding_steps": (
-                "1. Import streamlit, hashlib, random\n"
-                "2. Set page config with wide layout and weather icon\n"
-                "3. Define CONDITION_MAP dict mapping condition names to emojis\n"
-                "4. Implement generate_weather_data(city): use hash(city) as random seed "
-                "to produce deterministic temp (−10 to 40°C), humidity (20–95%), wind "
-                "(0–80 km/h), condition, and 5 daily forecasts\n"
-                "5. Initialize st.session_state.recent_searches as empty list\n"
-                "6. Render search bar: st.text_input + st.button('Search')\n"
-                "7. On search: call generate_weather_data, display 4 st.metric cards in "
-                "a 4-column layout\n"
-                "8. Render 5-day forecast line chart using st.line_chart with DataFrame\n"
-                "9. Render expandable details table using st.dataframe\n"
-                "10. Append city to recent searches (dedup, max 5)\n"
-                "11. Render sidebar with recent search buttons"
-            ),
             "app_code": (
                 "import streamlit as st\n"
                 "import hashlib\n"
@@ -508,21 +467,6 @@ SYNTHETIC_SESSIONS = [
                 "if idx >= len(questions): set_phase('result') → "
                 "if phase=='result': render_results(answers, score) → "
                 "render_breakdown_table() → on_restart()"
-            ),
-            "coding_steps": (
-                "1. Import streamlit\n"
-                "2. Define QUESTIONS list of dicts with keys: question, options (list of "
-                "4 strings), answer (index 0–3), explanation\n"
-                "3. Create 5 sample questions (Python trivia)\n"
-                "4. Initialize session_state: phase='intro', current_q=0, score=0, "
-                "answers=[], submitted=False\n"
-                "5. Implement render_intro(): show welcome text and 'Start Quiz' button\n"
-                "6. Implement render_question(): progress bar, question text, st.radio\n"
-                "7. Implement on_submit(): compare answer, set submitted=True, update score\n"
-                "8. Implement show_feedback(): st.success or st.error with explanation\n"
-                "9. Implement on_next(): increment current_q, check if quiz is done\n"
-                "10. Implement render_results(): score display, emoji rating, breakdown\n"
-                "11. Implement on_restart(): reset all session_state fields"
             ),
             "app_code": (
                 "import streamlit as st\n"
@@ -654,25 +598,6 @@ SYNTHETIC_SESSIONS = [
                 "[on_edit() | on_delete(note_id)] → "
                 "if mode=='edit': render_note_editor(note) → on_save(note) → "
                 "if mode=='create': render_note_editor(None) → on_create(title, body)"
-            ),
-            "coding_steps": (
-                "1. Import streamlit, uuid, datetime\n"
-                "2. Initialize st.session_state: notes=[], selected_id=None, mode='view'\n"
-                "3. Implement create_note(title, body): generate uuid, set timestamps, "
-                "prepend to notes list\n"
-                "4. Implement update_note(note_id, title, body): find note, update fields "
-                "and updated_at timestamp\n"
-                "5. Implement delete_note(note_id): remove from list, clear selection\n"
-                "6. Implement search_notes(query): case-insensitive substring match on "
-                "title and body\n"
-                "7. Render sidebar: st.text_input for search, st.button for new note, "
-                "list of note buttons\n"
-                "8. Render view mode: st.subheader(title), st.write(body), timestamps, "
-                "edit/delete buttons\n"
-                "9. Render editor mode: st.text_input(title), st.text_area(body), save/"
-                "cancel buttons\n"
-                "10. Handle mode transitions: view↔edit, view→create, create→view\n"
-                "11. Add sample welcome note on first launch for better UX"
             ),
             "app_code": (
                 "import streamlit as st\n"
