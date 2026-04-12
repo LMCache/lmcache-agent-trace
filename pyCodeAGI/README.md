@@ -26,13 +26,15 @@ We categorize KV cache reuse scenarios into two types:
 
 PyCodeAGI uses a fixed, deterministic 5-step pipeline:
 
-| Step | Task | Approx. Input Tokens |
+| Step | Task | Approx. Input Tokens¹ |
 |------|------|---------------------|
 | 1 | Generate app description | ~80 |
 | 2 | Design architecture | ~250 |
 | 3 | Design UX flow | ~600 |
 | 4 | Design code flow | ~1,200 |
 | 5 | Generate app code | ~2,000 |
+
+> ¹ Token counts approximate a real GPT-4 run with full-length outputs. The synthetic `trace.jsonl` uses compact representative outputs (~70–380 tokens per input) to keep the trace lightweight.
 
 Each step's system message carries a **growing context block**: the accumulated outputs of all prior steps. However, each step also changes its introductory instruction line (e.g., `"You are given the app name and description."` → `"You are given the app name, description and architecture."`), which means consecutive steps do **not** form a strict prefix chain.
 
